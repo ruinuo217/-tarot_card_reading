@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>Tarot: Mystic & Clear</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #020202; font-family: 'Noto Serif TC', serif; }
+        
+        #video-source { display: none; }
+
+        #ui-layer {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; z-index: 10;
+            display: flex; flex-direction: column; justify-content: space-between;
+        }
+
+        #guide-text {
+            margin-top: 60px; text-align: center;
+            color: #d4af37; 
+            font-size: 24px; letter-spacing: 8px; font-weight: 700;
+            text-transform: uppercase;
+            text-shadow: 0 0 15px rgba(212, 175, 55, 0.6);
+            transition: all 0.2s ease; opacity: 0; transform: translateY(-20px);
+        }
+        #guide-text.visible { opacity: 1; transform: translateY(0); }
+        #guide-text.gathering { text-shadow: 0 0 30px #ffaa00, 0 0 50px #ff4400; transform: scale(1.05); color: #fff; }
+        
+        #sub-text {
+            font-size: 14px; color: #888; letter-spacing: 4px; margin-top: 10px; font-weight: 400;
+        }
+
+        #result-area {
+            position: absolute; bottom: 0; left: 0; width: 100%;
+            padding-bottom: 80px; padding-top: 150px;
+            text-align: center; opacity: 0; 
+            /* 黑色漸變遮罩，確保文字清晰 */
+            background: linear-gradient(to top, #000 30%, rgba(0,0,0,0.8) 70%, transparent 100%);
+            transform: translateY(40px); transition: all 0.8s ease-out;
+        }
+        #result-area.show { opacity: 1; transform: translateY(0); }
+
+        #card-name {
+            font-size: 70px; color: #e8e8e8; margin: 0; font-weight: 700; letter-spacing: 12px;
+            text-shadow: 0 4px 10px rgba(0,0,0,1);
+        }
+        #card-desc {
+            font-size: 16px; color: #999; margin-top: 10px; 
+            letter-spacing: 4px; font-weight: 300; text-transform: uppercase;
+        }
+        #card-note {
+            font-size: 24px; color: #e6c288; margin-top: 25px; 
+            letter-spacing: 2px; font-weight: 500; line-height: 1.5;
+            text-shadow: 0 2px 10px rgba(0,0,0,1);
+            padding: 0 20px;
+        }
+
+        #fullscreen-btn {
+            position: absolute; bottom: 30px; right: 30px; pointer-events: auto;
+            background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);
+            color: #666; width: 40px; height: 40px; border-radius: 50%;
+            cursor: pointer; display: flex; align-items: center; justify-content: center;
+            transition: 0.3s;
+        }
+        #fullscreen-btn:hover { border-color: #888; color: #ccc; }
+
+        #loader {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            color: #444; font-size: 12px; letter-spacing: 4px;
+        }
+    </style>
+    
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@300;500;700&family=Cinzel:wght@700&display=swap" rel="stylesheet">
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/EffectComposer.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/RenderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/ShaderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/CopyShader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/shaders/LuminosityHighPassShader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+</head>
+<body>
+
+    <video id="video-source" playsinline></video>
+    <div id="loader">調整星相與光影...</div>
+
+    <div id="ui-layer">
+        <div id="guide-text" class="visible">
+            <div id="main-text">請握拳 · 凝聚能量</div>
+            <div id="sub-text">待能量充滿後張開手掌</div>
+        </div>
+        
+        <div id="result-area">
+            <h1 id="card-name"></h1>
+            <p id="card-desc"></p>
+            <p id="card-note"></p>
+        </div>
+    </div>
+    <button id="fullscreen-btn">⛶</button>
+
+    <script>
+        const TAROT_DATA = [
+            { name: "愚者", en: "THE FOOL", desc: "天真 · 流浪 · 新開始", note: "別想太多，這是一場說走就走的冒險，衝就對了！" },
+            { name: "魔術師", en: "THE MAGICIAN", desc: "創造 · 自信 · 潛能", note: "你其實什麼都不缺，現在就是展現身手的最佳時機。" },
+            { name: "女祭司", en: "HIGH PRIESTESS", desc: "直覺 · 潛意識 · 智慧", note: "相信你的直覺，有些答案不在腦袋裡，而在心裡。" },
+            { name: "皇后", en: "THE EMPRESS", desc: "豐饒 · 母性 · 自然", note: "對自己好一點，享受當下，你值得被溫柔對待。" },
+            { name: "皇帝", en: "THE EMPEROR", desc: "權威 · 結構 · 控制", note: "收起混亂，現在你需要的是理性的規劃與紀律。" },
+            { name: "戀人", en: "THE LOVERS", desc: "和諧 · 選擇 · 連結", note: "面對選擇時，問問自己：哪一條路讓你感到「愛」？" },
+            { name: "戰車", en: "THE CHARIOT", desc: "意志 · 勝利 · 勇氣", note: "咬緊牙關撐過去，勝利就在眼前，別輕言放棄！" },
+            { name: "力量", en: "STRENGTH", desc: "勇氣 · 耐心 · 包容", note: "真正的強大不是硬碰硬，而是溫柔堅定的包容。" },
+            { name: "隱士", en: "THE HERMIT", desc: "內省 · 孤獨 · 真理", note: "暫時關掉手機吧，你需要獨處來聽聽內心的聲音。" },
+            { name: "命運之輪", en: "WHEEL OF FORTUNE", desc: "轉變 · 機遇 · 循環", note: "順其自然，運氣正在轉向，壞的終究會過去。" },
+            { name: "死神", en: "DEATH", desc: "結束 · 轉變 · 重生", note: "舊的不去新的不來，該放手的就別再抓著不放了。" },
+            { name: "高塔", en: "THE TOWER", desc: "驟變 · 覺醒 · 重建", note: "雖然現在看起來很混亂，但这正是打掉重練的好機會。" },
+            { name: "星星", en: "THE STAR", desc: "希望 · 靈感 · 指引", note: "黑暗中總有光，保持希望，療癒正在發生。" },
+            { name: "月亮", en: "THE MOON", desc: "幻象 · 恐懼 · 探索", note: "別被恐懼嚇到了，事情沒有你想的那麼糟。" },
+            { name: "太陽", en: "THE SUN", desc: "成功 · 快樂 · 真相", note: "放心吧！烏雲散去，快樂和成功馬上就到。" },
+            { name: "審判", en: "JUDGEMENT", desc: "覺醒 · 召喚 · 寬恕", note: "聽從內心的召喚，別再猶豫，你知道該怎麼做。" },
+            { name: "世界", en: "THE WORLD", desc: "圓滿 · 達成 · 結局", note: "恭喜你！這階段的任務圓滿完成，享受成果吧。" }
+        ];
+
+        const STATES = { IDLE: 0, SHUFFLE: 1, SELECT: 2, REVEAL: 3 };
+        let currentState = STATES.IDLE;
+        let isGathering = false; 
+        let inputLocked = false; 
+        let globalRotation = 0;
+        let rotationVelocity = 0.002;
+        const BASE_SPEED = 0.002;
+
+        // --- 1. 場景 (回歸暗調) ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x020202); 
+        scene.fog = new THREE.FogExp2(0x020202, 0.02);
+
+        const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.z = 28;
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.toneMapping = THREE.ReinhardToneMapping; 
+        renderer.toneMappingExposure = 1.0; // 降低曝光，讓背景更黑
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.appendChild(renderer.domElement);
+
+        // --- 2. 燈光系統 (氛圍 > 亮度) ---
+        
+        // A. 環境光: 減弱，只保留基本輪廓
+        const ambientLight = new THREE.AmbientLight(0x404040, 0.5); 
+        scene.add(ambientLight);
+
+        // B. 核心光: 握拳時會變強，平常維持神秘感
+        const centerLight = new THREE.PointLight(0xffaa00, 1.0, 80);
+        centerLight.position.set(0, 5, 5);
+        scene.add(centerLight);
+
+        // C. 輪廓光 (Rim Light): 藍紫色，從後方勾勒
+        const rimLight = new THREE.SpotLight(0x4455ff, 3.0);
+        rimLight.position.set(0, 15, -15);
+        rimLight.lookAt(0,0,0);
+        scene.add(rimLight);
+
+        // D. 閱讀燈 (Reading Light): 翻牌專用，正面柔和補光
+        // 初始為0，翻牌時開啟
+        const readingLight = new THREE.SpotLight(0xfff0e0, 0); 
+        readingLight.position.set(0, 2, 45);
+        readingLight.angle = 0.5;
+        readingLight.penumbra = 1;
+        scene.add(readingLight);
+
+        // E. 手部光
+        const handLight = new THREE.PointLight(0x00ffff, 0, 20);
+        scene.add(handLight);
+
+        // --- Post Processing (Glow 控制) ---
+        const composer = new THREE.EffectComposer(renderer);
+        composer.addPass(new THREE.RenderPass(scene, camera));
+        
+        const bloomPass = new THREE.UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.5, 0.4, 0.85);
+        bloomPass.threshold = 0.5; 
+        bloomPass.radius = 0.6;
+        composer.addPass(bloomPass);
+
+        // 動態 Glow 強度
+        let targetBloomStrength = 1.2;
+
+        // 星塵
+        function createStars() {
+            const geom = new THREE.BufferGeometry();
+            const counts = 1000;
+            const pos = new Float32Array(counts * 3);
+            for(let i=0; i<counts*3; i++) pos[i] = (Math.random()-0.5) * 120;
+            geom.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+            const mat = new THREE.PointsMaterial({color: 0x88ccff, size: 0.15, transparent: true, opacity: 0.5});
+            return new THREE.Points(geom, mat);
+        }
+        const stars = createStars();
+        scene.add(stars);
+
+        // --- 3. 材質 ---
+        
+        function createBackTexture() {
+            const canvas = document.createElement('canvas'); canvas.width = 512; canvas.height = 1024;
+            const ctx = canvas.getContext('2d');
+            const grad = ctx.createLinearGradient(0,0,512,1024);
+            grad.addColorStop(0, '#1a1a25'); grad.addColorStop(1, '#050508');
+            ctx.fillStyle = grad; ctx.fillRect(0,0,512,1024);
+            ctx.strokeStyle = '#c5a059'; ctx.lineWidth = 25; ctx.strokeRect(20,20,472,984);
+            ctx.beginPath(); ctx.arc(256, 512, 160, 0, Math.PI*2); ctx.stroke();
+            ctx.font = "bold 80px serif"; ctx.fillStyle = "#c5a059"; ctx.textAlign = "center"; ctx.textBaseline="middle";
+            ctx.fillText("FATE", 256, 512);
+            return new THREE.CanvasTexture(canvas);
+        }
+
+        function drawSymbol(ctx, type, x, y, size) {
+            ctx.strokeStyle = '#222'; ctx.lineWidth = 3; ctx.beginPath();
+            // 簡單模擬偉特風格線條
+            ctx.arc(x, y, size*0.5, 0, Math.PI*2);
+            ctx.moveTo(x-size*0.5, y); ctx.lineTo(x+size*0.5, y);
+            ctx.moveTo(x, y-size*0.5); ctx.lineTo(x, y+size*0.5);
+            ctx.stroke();
+        }
+
+        function createFrontTexture(card) {
+            const canvas = document.createElement('canvas'); canvas.width = 512; canvas.height = 1024;
+            const ctx = canvas.getContext('2d');
+            
+            // 羊皮紙色 (稍微暗沉一點，配合燈光不刺眼)
+            ctx.fillStyle = '#e0d8c8'; ctx.fillRect(0,0,512,1024);
+            
+            // 邊緣做舊
+            const grad = ctx.createRadialGradient(256, 512, 300, 256, 512, 600);
+            grad.addColorStop(0, 'rgba(0,0,0,0)'); grad.addColorStop(1, 'rgba(50,40,30,0.2)');
+            ctx.fillStyle = grad; ctx.fillRect(0,0,512,1024);
+
+            ctx.strokeStyle = '#222'; ctx.lineWidth = 15; ctx.strokeRect(30,30,452,964);
+
+            ctx.fillStyle = '#000'; 
+            ctx.font = "bold 90px 'Noto Serif TC'"; 
+            ctx.textAlign = "center"; ctx.textBaseline = "middle";
+            ctx.fillText(card.name[0], 256, 512); // 中文單字當背景
+            
+            ctx.font = "bold 50px 'Cinzel'"; 
+            ctx.fillText(card.en, 256, 880);
+
+            // 中央圖騰
+            ctx.save(); ctx.translate(256, 450);
+            ctx.fillStyle = '#d4af37'; ctx.beginPath(); ctx.arc(0,0,100,0,Math.PI*2); ctx.fill();
+            drawSymbol(ctx, card.en, 0, 0, 150);
+            ctx.restore();
+
+            return new THREE.CanvasTexture(canvas);
+        }
+
+        const backTex = createBackTexture();
+
+        class Card {
+            constructor(i) {
+                // 邊框：金屬
+                const goldMat = new THREE.MeshStandardMaterial({
+                    color: 0xffd700, roughness: 0.3, metalness: 0.9
+                });
+                // 背面：磨砂
+                const backMat = new THREE.MeshStandardMaterial({
+                    map: backTex, roughness: 0.6, metalness: 0.3
+                });
+                // 正面：紙張 (高粗糙，不反光)
+                const frontMat = new THREE.MeshStandardMaterial({
+                    color: 0x111111, roughness: 0.9, metalness: 0.0
+                });
+
+                this.mesh = new THREE.Mesh(
+                    new THREE.BoxGeometry(3.2, 5.6, 0.08), 
+                    [goldMat, goldMat, goldMat, goldMat, frontMat, backMat]
+                );
+                this.initialZ = -i * 0.05;
+                this.mesh.position.set(0, 0, this.initialZ);
+                this.mesh.rotation.y = Math.PI;
+                this.targetPos = new THREE.Vector3(0,0,this.initialZ);
+                this.targetRot = new THREE.Vector3(0, Math.PI, 0);
+                this.orbitAngle = 0; this.orbitRadius = 0; this.orbitY = 0; this.orbitSpeed = 0;
+                this.active = true;
+                this.velocity = new THREE.Vector3();
+                scene.add(this.mesh);
+            }
+
+            update() {
+                if(!this.active) {
+                    this.velocity.y -= 0.025; 
+                    this.mesh.position.add(this.velocity);
+                    this.mesh.rotation.x += 0.05;
+                    return;
+                }
+                this.mesh.position.lerp(this.targetPos, 0.08);
+                this.mesh.rotation.x += (this.targetRot.x - this.mesh.rotation.x) * 0.08;
+                this.mesh.rotation.y += (this.targetRot.y - this.mesh.rotation.y) * 0.08;
+                this.mesh.rotation.z += (this.targetRot.z - this.mesh.rotation.z) * 0.08;
+            }
+        }
+
+        const cards = [];
+        for(let i=0; i<36; i++) cards.push(new Card(i));
+        let selectedIndex = -1;
+        let finalCardData = null;
+
+        document.getElementById('loader').style.display = 'none';
+
+        // --- 4. 邏輯控制 ---
+
+        function updateGuide(main, sub) {
+            const el = document.getElementById('guide-text');
+            if (el.dataset.currentMain === main) return;
+            el.classList.remove('visible');
+            el.dataset.currentMain = main;
+            setTimeout(() => {
+                document.getElementById('main-text').innerText = main;
+                document.getElementById('sub-text').innerText = sub || "";
+                el.classList.add('visible');
+            }, 300);
+        }
+
+        function toIdle() {
+            if(inputLocked) return;
+            currentState = STATES.IDLE;
+            updateGuide("請握拳 · 凝聚能量", "待能量充滿後張開手掌");
+            
+            // 恢復強 Glow (但場景是暗的)
+            targetBloomStrength = 1.2;
+            readingLight.intensity = 0;
+            centerLight.intensity = 1.0;
+            rotationVelocity = BASE_SPEED;
+            
+            document.getElementById('guide-text').classList.remove('gathering');
+            document.getElementById('result-area').classList.remove('show');
+            setTimeout(() => {
+                document.getElementById('card-name').innerText = "";
+                document.getElementById('card-desc').innerText = "";
+                document.getElementById('card-note').innerText = "";
+            }, 800);
+
+            cards.forEach((c,i) => {
+                c.active = true;
+                c.targetPos.set(0, 0, c.initialZ);
+                c.targetRot.set(0, Math.PI, 0);
+                c.mesh.material[4].map = null;
+                c.mesh.material[4].color.setHex(0x111111);
+                c.mesh.material[4].needsUpdate = true;
+                c.velocity.set(0,0,0);
+                c.mesh.material[0].emissive.setHex(0x000000);
+            });
+        }
+
+        function toShuffle() {
+            currentState = STATES.SHUFFLE;
+            updateGuide("左右揮動 · 撥轉命運", "比出食指以選擇");
+            targetBloomStrength = 1.2;
+            document.getElementById('guide-text').classList.remove('gathering');
+
+            cards.forEach(c => {
+                c.mesh.material[0].emissive.setHex(0x000000); 
+                c.orbitRadius = 15 + Math.random() * 20; 
+                c.baseAngle = Math.random() * Math.PI * 2;
+                c.orbitY = (Math.random() - 0.5) * 30;
+                c.targetPos.set(Math.cos(c.baseAngle)*c.orbitRadius, c.orbitY, Math.sin(c.baseAngle)*c.orbitRadius);
+                c.targetRot.set(Math.random()*6, Math.random()*6, Math.random()*6);
+            });
+        }
+
+        function toSelect() {
+            currentState = STATES.SELECT;
+            updateGuide("揮動手掌 · 揭曉牌面", "向左或向右揮動以翻牌");
+            
+            selectedIndex = Math.floor(Math.random()*cards.length);
+            finalCardData = TAROT_DATA[Math.floor(Math.random()*TAROT_DATA.length)];
+            
+            const tex = createFrontTexture(finalCardData);
+            const paperMat = new THREE.MeshStandardMaterial({
+                map: tex, roughness: 0.9, metalness: 0.0
+            });
+            cards[selectedIndex].mesh.material[4] = paperMat;
+
+            cards.forEach((c,i) => {
+                if(i === selectedIndex) {
+                    c.targetPos.set(0,0,0);
+                    c.targetRot.set(0, Math.PI, 0); 
+                } else {
+                    c.active = false;
+                    c.velocity.set((Math.random()-0.5)*2, Math.random(), (Math.random()-0.5)*2);
+                }
+            });
+        }
+
+        function toReveal() {
+            if(inputLocked) return;
+            currentState = STATES.REVEAL;
+            updateGuide("", ""); 
+            inputLocked = true;
+
+            // 翻牌瞬間：
+            // 1. Glow 降低，避免文字暈開
+            targetBloomStrength = 0.15; 
+            // 2. 開啟閱讀燈，照亮紙張
+            readingLight.intensity = 1.2; 
+            // 3. 稍微降低背景光，突出主角
+            centerLight.intensity = 0.5;
+
+            const c = cards[selectedIndex];
+            c.targetPos.set(0, 0, 18);
+            c.targetRot.set(0, 0, 0);
+            c.targetRot.z = 0.02; 
+
+            setTimeout(() => {
+                document.getElementById('card-name').innerText = finalCardData.name;
+                document.getElementById('card-desc').innerText = finalCardData.desc;
+                document.getElementById('card-note').innerText = finalCardData.note;
+                document.getElementById('result-area').classList.add('show');
+                
+                setTimeout(() => {
+                    inputLocked = false;
+                    updateGuide("握拳 · 重新開始", "");
+                }, 2000);
+            }, 600);
+        }
+
+        // --- 5. 手勢 ---
+        let lastHandX = 0;
+
+        function onResults(results) {
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const lm = results.multiHandLandmarks[0];
+                
+                const hx = (0.5 - lm[9].x) * 40;
+                const hy = (0.5 - lm[9].y) * 30;
+                handLight.position.set(hx, hy, 10);
+                handLight.intensity = 2;
+
+                const wrist = lm[0];
+                const tips = [lm[4], lm[8], lm[12], lm[16], lm[20]];
+                const dist = (p1, p2) => Math.sqrt(Math.pow(p1.x-p2.x,2) + Math.pow(p1.y-p2.y,2));
+                const fExt = tips.map(t => dist(t, wrist));
+                
+                const isFist = fExt.every(d => d < 0.30);
+                const isHighOpen = fExt.every(d => d > 0.28);
+                const isOne = fExt[1] > 0.3 && fExt[2] < 0.25 && fExt[3] < 0.25;
+
+                const cx = lm[9].x;
+                const deltaX = (cx - lastHandX) * 2.0;
+                const isSwipe = Math.abs(deltaX) > 0.03;
+
+                if (!inputLocked) {
+                    if (currentState === STATES.IDLE) {
+                        if (isFist) {
+                            if (!isGathering) {
+                                isGathering = true;
+                                updateGuide("能量充盈 · 準備釋放", "現在張開手掌！");
+                                document.getElementById('guide-text').classList.add('gathering');
+                                cards.forEach(c => {
+                                    c.mesh.material[0].emissive.setHex(0xffaa00); 
+                                    c.mesh.material[0].emissiveIntensity = 3.0;
+                                });
+                            }
+                        }
+                        if (isHighOpen && isGathering) {
+                            isGathering = false;
+                            toShuffle();
+                        }
+                    }
+                    else if (currentState === STATES.SHUFFLE) {
+                        if (!isOne) rotationVelocity += deltaX * 0.1;
+                        if (isOne) toSelect();
+                    }
+                    else if (currentState === STATES.SELECT) {
+                        if (isSwipe) toReveal();
+                    }
+                    else if (currentState === STATES.REVEAL) {
+                        if (isFist) toIdle();
+                    }
+                }
+                lastHandX = cx;
+            } else {
+                handLight.intensity = 0;
+            }
+        }
+
+        const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+        hands.setOptions({maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5});
+        hands.onResults(onResults);
+
+        const videoEl = document.getElementById('video-source');
+        const cameraUtils = new Camera(videoEl, {
+            onFrame: async () => { await hands.send({image: videoEl}); },
+            width: 640, height: 480
+        });
+        cameraUtils.start();
+
+        // --- 6. 渲染 ---
+        
+        let time = 0;
+        function animate() {
+            requestAnimationFrame(animate);
+            time += 0.01;
+            
+            // 燈光漸變
+            bloomPass.strength += (targetBloomStrength - bloomPass.strength) * 0.05;
+            readingLight.intensity += (readingLight.intensity > 0 ? 0 : 0);
+
+            if (currentState === STATES.REVEAL && selectedIndex !== -1) {
+                 const c = cards[selectedIndex];
+                 c.targetPos.set(0, 0, 18);
+                 c.targetPos.y = Math.sin(time) * 0.1;
+            }
+
+            if (currentState === STATES.IDLE && isGathering) {
+                centerLight.intensity = 2 + Math.sin(time * 30) * 1.5; 
+                cards.forEach((c, i) => {
+                    c.targetPos.y = Math.sin(time * 20 + i) * 0.1 + (Math.random()-0.5)*0.05;
+                    c.targetPos.x = Math.cos(time * 15 + i) * 0.1 + (Math.random()-0.5)*0.05;
+                    c.targetPos.z = c.initialZ + 1.5;
+                });
+            } else if (currentState === STATES.IDLE) {
+                centerLight.intensity = 1.0;
+            }
+
+            cards.forEach(c => c.update());
+
+            if(currentState === STATES.SHUFFLE) {
+                rotationVelocity = Math.max(Math.min(rotationVelocity, 0.15), -0.15);
+                globalRotation += rotationVelocity;
+                if (Math.abs(rotationVelocity) > BASE_SPEED) {
+                    rotationVelocity *= 0.95;
+                } else {
+                    rotationVelocity = BASE_SPEED;
+                }
+
+                cards.forEach(c => {
+                    const currentAngle = c.baseAngle + globalRotation;
+                    const r = c.orbitRadius + Math.sin(time*2)*3;
+                    c.targetPos.x = Math.cos(currentAngle)*r;
+                    c.targetPos.z = Math.sin(currentAngle)*r;
+                    c.targetPos.y = c.orbitY + Math.cos(time + currentAngle)*3;
+                    c.targetRot.y += Math.abs(rotationVelocity) * 5;
+                });
+            }
+
+            stars.rotation.y += 0.0003;
+            composer.render();
+        }
+        animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            composer.setSize(window.innerWidth, window.innerHeight);
+        });
+        document.getElementById('fullscreen-btn').addEventListener('click', () => {
+            if(!document.fullscreenElement) document.documentElement.requestFullscreen();
+            else document.exitFullscreen();
+        });
+    </script>
+</body>
+</html>
